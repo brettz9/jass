@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>JASS testing</title>
+<script src="assert.js"></script>
+<script src="../jass.js"></script></head>
+<body>
+<script>
+(function () {'use strict';
+/*globals JASS, assert*/
+
+var jss = JASS.stringify;
+
+assert.matches(jss({
+    charset: 'UTF-8' // optional: builds @charset "UTF-8"; // single or double strings (accept array to decide which)
+}), '@charset "UTF-8";\n');
+
+assert.matches(jss({
+    imports: [ // optional: builds @import (though individual letters can be escaped!) followed by supposedly optional whitespace, then a (single or double-quoted quoted) string or URI (url(...) whose contents are optional whitespace followed by a single or double-quoted string or a "url" (characters are limited), and then optional whitespace again), then optional whitespace and an optional media list in CSS without mediaqueries (a medium (a medium IDENT + optional whitespace) followed by any number of comma + optional whitespace + medium sequences) or an optional media query list (comma+optional whitespace-separated media queries (optional ONLY or NOT + optional whitespace + IDENT media type + optional whitespace + any number of optional AND+optional whitespace+expression (parentheses-enclosed optional whitespace + IDENT media feature + optional whitespace + optional (colon + optional whitespace + expr sequence) sequence) sequences...OR...an expression + any number of AND + optional whitespace + expression sequences)) where mediaqueries are supported, then a required semicolon and optional whitespace, and followed by whitespace or comment openers/closers (but apparently not comment text!)
+        // If media queries are supported can use this: ['file1.css', 'projection', 'tv'], 'file2.css' // Keeping it simple, we may just add as double-quoted string whose unescaped internal double quotes are auto-escaped
+        // To build: projection, tv, ONLY screen AND (color) AND (min-width: 500px), (orientation:portrait) AND (color)
+        ['file1.css', 'projection', 'tv',
+            {
+                type: 'screen',
+                only: 1,
+                not: 0,
+                features: [
+                    'color',
+                    ['min-width', 500, 'px']
+                ]
+            },
+            [
+                ['orientation', 'portrait'], 'color'
+            ]
+        ]
+    ]
+}), '@import "file1.css" projection, tv, ONLY screen AND (color) AND (min-width:500px), (orientation:portrait) AND (color);\n');
+
+assert.matches(jss({
+    namespaces: [// optional: build @namespace (though individual letters can be escaped!), optional whitespace, an optional IDENT for the prefix with optional ending whitespace, then a double or single-quoted string or URI followed by optional whitespace, a required semicolon, and optional whitespace http://www.w3.org/TR/css3-namespace/#syntax
+    // seems useless (and even if it allowed comment text, I am not currently planning to support round-trippable conversion from strings with useless non-canonical whitespace and comments, etc.): 
+        'defaultNS',
+        ['prefix', 'NS']
+    ]
+}), '@namespace "defaultNS";\n'+
+    '@namespace prefix "NS";\n'
+);
+
+assert.matches(jss({
+    rules: [
+        {page: {
+            pseudo: 'left',
+            declarations: [
+                ['margin-left', 4, 'cm', 'important'],
+                ['margin-right', 3 , 'cm']
+            ]
+        }}
+    ]
+}, {simplePage: true}), '@page :left {\n' +
+     '    margin-left: 4cm !important;\n' +
+     '    margin-right: 3cm;\n' +
+     '}\n'
+);
+
+assert.matches(jss({
+        rules: [
+            {
+                media: ['screen', 'print'],
+                rules: [['body']]
+            }
+        ]
+    }, {noMediaQueries: true}), '@media screen, print {\n' +
+         '    body {\n' +
+         '        line-height: 1.2;\n' + 
+         '    }\n' +
+         '}\n'
+);
+
+assert.matches(jss({
+        rules: [
+            {
+                media: ['projection', 'tv',
+                    {
+                        type: 'screen',
+                        only: 1,
+                        not: 0,
+                        features: [
+                            'color',
+                            ['min-width', 500, 'px']
+                        ]
+                    },
+                    [
+                        ['orientation', 'portrait'], 'color'
+                    ]
+                ],
+                rules: [['body']]
+            }
+        ]
+    }), '@media projection, tv, ONLY screen AND (color) AND (min-width:500px), (orientation:portrait) AND (color) {\n' +
+         '    body {\n' +
+         '        line-height: 1.2;\n' + 
+         '    }\n' +
+         '}\n'
+);
+
+// Rule as just an array instead of object with rules property
+// todo: selectors, declaration, hierarchical body
+assert.matches(jss([
+    {
+        media: ['tv'],
+        rules: [
+            {pageRule: {
+                selectors: ['left', 'right'],
+                bodies: [
+                    {
+                        margins: [
+                            ['top-left-corner', ['color', 'red', 'important'], ['background-color', 'gray']],
+                            ['right-bottom', ['color', 'yellow', 'important']]
+                        ],
+                        declaration: ['font-weight', 'bold'] // If one wants additional declarations, one can add it following this object directly in the "bodies" array
+                    },
+                    ['color', 'yellow', 'important']
+                ]
+            }},
+            {pageRule: {
+                selectors: [{id: 'myID', pseudos: ['left', 'first', 'blank']}],
+                bodies: [
+                    {margins: [
+                        ['right-bottom', ['color', 'yellow', 'important']]
+                    ]}
+                ]
+            }},
+            {pageRule: {
+                selectors: ['left', 'first', 'blank'],
+                bodies: [
+                    { // Can remove this object in favor of just the inner array (see example following)
+                        declaration: ['right-bottom', ['color', 'yellow', 'important']]
+                    }
+                ]
+            }},
+            {pageRule: {
+                selectors: ['left', 'first', 'blank'],
+                bodies: [
+                    ['right-bottom', ['color', 'yellow', 'important']]
+                ]
+            }},
+            {pageRule: {
+                selectors: ['first', 'blank'],
+                bodies: [ // Could omit entirely
+                ]
+            }},
+            {pageRule: {
+                selectors: [{id: 'myID'}], // Can omit pseudo pages
+                // Can omit body entirely
+            }}
+        ]
+    }
+]), '@media tv {\n' +
+     '    @page :left:right {\n' +
+     '' +
+     
+     // margins:
+     '        @top-left-corner {\n' +
+     '            color: red !important;\n' +
+     '            background-color: gray;\n' +
+     
+     // insert: font-weight: bold
+     
+     '        }\n' + 
+     '        @right-bottom {\n' +
+     '            color: yellow !important;\n' +
+     '        }\n' +
+     '    }\n' +
+     '}\n'
+);
+/*
+assert.matches(jss({
+    rules: [
+        
+    ]
+}), '');
+
+jss({
+    charset: 'UTF-8',
+    imports: [
+        ['file1.css', 'projection', 'tv',
+            {
+                type: 'screen',
+                only: 1,
+                not: 0,
+                features: [
+                    'color',
+                    ['min-width', '500', 'px']
+                ]
+            },
+            [
+                ['orientation', 'portrait'], 'color'
+            ]
+        ]
+    ],
+    namespaces: [
+        'defaultNS',
+        ['prefix', 'NS']
+    ],
+    rules: [ // optional: builds any number of ruleset, media, or page + whitespace or comment openers/closers in any order
+        {media: []},
+        {page: []},
+        [] // ruleset
+        // Could do all as arrays with first argument as the type, but ruleset should be the most common
+    ]
+});
+*/
+
+
+}());
+</script>
+</body>
+</html>
